@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("C9Launcher")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e269bc1e90e884407bb926c5c07b19ef7e99a244")]
 [assembly: System.Reflection.AssemblyProductAttribute("C9Launcher")]
 [assembly: System.Reflection.AssemblyTitleAttribute("C9Launcher")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
