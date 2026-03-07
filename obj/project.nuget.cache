@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "eZl+13ZeXkk=",
+  "success": true,
+  "projectFilePath": "E:\\allc9\\C9Launcher\\C9Launcher\\C9Launcher.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\USER\\.nuget\\packages\\htmlagilitypack\\1.12.4\\htmlagilitypack.1.12.4.nupkg.sha512"
+  ],
+  "logs": []
+}
