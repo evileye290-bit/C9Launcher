@@ -1,9 +1,3 @@
-E:\allc9\C9Launcher\C9Launcher\bin\Debug\net8.0-windows\C9Launcher.exe
-E:\allc9\C9Launcher\C9Launcher\bin\Debug\net8.0-windows\C9Launcher.deps.json
-E:\allc9\C9Launcher\C9Launcher\bin\Debug\net8.0-windows\C9Launcher.runtimeconfig.json
-E:\allc9\C9Launcher\C9Launcher\bin\Debug\net8.0-windows\C9Launcher.dll
-E:\allc9\C9Launcher\C9Launcher\bin\Debug\net8.0-windows\C9Launcher.pdb
-E:\allc9\C9Launcher\C9Launcher\bin\Debug\net8.0-windows\HtmlAgilityPack.dll
 E:\allc9\C9Launcher\C9Launcher\obj\Debug\net8.0-windows\C9Launcher.csproj.AssemblyReference.cache
 E:\allc9\C9Launcher\C9Launcher\obj\Debug\net8.0-windows\MainWindow.baml
 E:\allc9\C9Launcher\C9Launcher\obj\Debug\net8.0-windows\MainWindow.g.cs
@@ -15,6 +9,13 @@ E:\allc9\C9Launcher\C9Launcher\obj\Debug\net8.0-windows\C9Launcher.GeneratedMSBu
 E:\allc9\C9Launcher\C9Launcher\obj\Debug\net8.0-windows\C9Launcher.AssemblyInfoInputs.cache
 E:\allc9\C9Launcher\C9Launcher\obj\Debug\net8.0-windows\C9Launcher.AssemblyInfo.cs
 E:\allc9\C9Launcher\C9Launcher\obj\Debug\net8.0-windows\C9Launcher.csproj.CoreCompileInputs.cache
+E:\allc9\C9Launcher\C9Launcher\obj\Debug\net8.0-windows\C9Launcher.sourcelink.json
+E:\allc9\C9Launcher\C9Launcher\bin\Debug\net8.0-windows\C9Launcher.exe
+E:\allc9\C9Launcher\C9Launcher\bin\Debug\net8.0-windows\C9Launcher.deps.json
+E:\allc9\C9Launcher\C9Launcher\bin\Debug\net8.0-windows\C9Launcher.runtimeconfig.json
+E:\allc9\C9Launcher\C9Launcher\bin\Debug\net8.0-windows\C9Launcher.dll
+E:\allc9\C9Launcher\C9Launcher\bin\Debug\net8.0-windows\C9Launcher.pdb
+E:\allc9\C9Launcher\C9Launcher\bin\Debug\net8.0-windows\HtmlAgilityPack.dll
 E:\allc9\C9Launcher\C9Launcher\obj\Debug\net8.0-windows\C9Launcher.csproj.Up2Date
 E:\allc9\C9Launcher\C9Launcher\obj\Debug\net8.0-windows\C9Launcher.dll
 E:\allc9\C9Launcher\C9Launcher\obj\Debug\net8.0-windows\refint\C9Launcher.dll

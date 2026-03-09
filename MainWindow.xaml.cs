@@ -59,6 +59,26 @@ namespace C9Launcher
             }
         }
 
+        // --- ส่วนควบคุม UI หน้าต่างไร้ขอบ (Borderless Window) ---
+        private void Window_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == System.Windows.Input.MouseButton.Left)
+            {
+                this.DragMove();
+            }
+        }
+
+        private void BtnClose_Click(object sender, RoutedEventArgs e)
+        {
+            Application.Current.Shutdown();
+        }
+
+        private void BtnMinimize_Click(object sender, RoutedEventArgs e)
+        {
+            this.WindowState = WindowState.Minimized;
+        }
+        // --------------------------------------------------------
+
         private class NewsItem
         {
             public string Category { get; set; } = "";
@@ -230,10 +250,27 @@ namespace C9Launcher
                     summary = summary.Replace("\r", " ").Replace("\n", " ").Trim();
                 }
 
+                // ดึงรูปภาพ และรองรับ onerror แบบของเว็บคุณ
                 var imageNode = node.SelectSingleNode(".//div[contains(@class,'news-img-box')]//img");
                 if (imageNode != null)
                 {
                     string src = imageNode.GetAttributeValue("src", "").Trim();
+
+                    // ถ้า src ว่างเปล่า ให้ลองดึงจาก onerror มาใช้
+                    if (string.IsNullOrWhiteSpace(src))
+                    {
+                        string onError = imageNode.GetAttributeValue("onerror", "");
+                        if (onError.Contains("this.src="))
+                        {
+                            int start = onError.IndexOf('\'') + 1;
+                            int end = onError.LastIndexOf('\'');
+                            if (start > 0 && end > start)
+                            {
+                                src = onError.Substring(start, end - start);
+                            }
+                        }
+                    }
+
                     if (!string.IsNullOrWhiteSpace(src))
                         imageUrl = MakeAbsoluteUrl(newsPageUrl, src);
                 }
@@ -280,22 +317,38 @@ namespace C9Launcher
 
             if (!string.IsNullOrWhiteSpace(item.ImageUrl))
             {
-                try
-                {
-                    BitmapImage bitmap = new BitmapImage();
-                    bitmap.BeginInit();
-                    bitmap.UriSource = new Uri(item.ImageUrl, UriKind.Absolute);
-                    bitmap.CacheOption = BitmapCacheOption.OnLoad;
-                    bitmap.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
-                    bitmap.EndInit();
-                    bitmap.Freeze();
+                // โหลดรูปภาพแบบเบื้องหลัง (ไม่ทำให้หน้าต่างค้าง)
+                _ = LoadNewsImageAsync(item.ImageUrl);
+            }
+        }
 
-                    NewsImage.Source = bitmap;
-                }
-                catch
-                {
-                    NewsImage.Source = null;
-                }
+        // ฟังก์ชันโหลดรูปภาพแบบจำลองตัวเป็นบราวเซอร์ เพื่อแก้ปัญหาเว็บหล็อก
+        private async Task LoadNewsImageAsync(string url)
+        {
+            try
+            {
+                using HttpClient client = new HttpClient();
+                // แนบ User-Agent เข้าไปเพื่อไม่ให้เว็บไซต์มองว่าเป็นบอท
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+
+                // โหลดข้อมูลรูปมาเป็นไบต์
+                byte[] imageBytes = await client.GetByteArrayAsync(url);
+
+                // แปลงไบต์เป็นรูปภาพ
+                using MemoryStream stream = new MemoryStream(imageBytes);
+                BitmapImage bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.StreamSource = stream;
+                bitmap.EndInit();
+                bitmap.Freeze(); // สำคัญมาก เพื่อให้แสดงผลลื่นไหล
+
+                NewsImage.Source = bitmap;
+            }
+            catch
+            {
+                // หากโหลดไม่สำเร็จ ให้ปล่อยว่างไว้ไม่ให้โปรแกรมแครช
+                NewsImage.Source = null;
             }
         }
 
@@ -308,12 +361,6 @@ namespace C9Launcher
             }
 
             TxtNewsIndex.Text = $"{currentNewsIndex + 1}/{newsItems.Count}";
-        }
-
-        private void NewsCard_MouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
-        {
-            string url = NewsCard.Tag?.ToString() ?? newsPageUrl;
-            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
         }
 
         private void BtnPrevNews_Click(object sender, RoutedEventArgs e)
@@ -351,6 +398,26 @@ namespace C9Launcher
                 newsTimer.Stop();
                 newsTimer.Start();
             }
+        }
+
+        // --- ฟังก์ชันสำหรับการคลิกกล่องข่าว (เปิดบราวเซอร์) ---
+        private void NewsCard_MouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            string url = NewsCard.Tag?.ToString() ?? newsPageUrl;
+            try
+            {
+                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("ไม่สามารถเปิดหน้าเว็บได้: " + ex.Message, "Error");
+            }
+        }
+
+        // --- ฟังก์ชันบล็อคไม่ให้คลิกข่าวทะลุไปโดนการลากหน้าต่าง ---
+        private void NewsCard_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            e.Handled = true;
         }
 
         // --- 6. ปุ่ม social ---

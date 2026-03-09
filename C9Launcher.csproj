@@ -10,11 +10,21 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Remove="Banners\bg.png" />
+    <None Remove="Banners\logo\logo.png" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="logo.ico" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="HtmlAgilityPack" Version="1.12.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Banners\bg.png" />
+    <Resource Include="Banners\logo\logo.png" />
   </ItemGroup>
 
 </Project>
