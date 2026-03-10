@@ -1,5 +1,7 @@
-﻿using System;
+﻿using Microsoft.Extensions.Configuration;
+using System;
 using System.Collections.Generic;
+using System.Configuration;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
@@ -8,12 +10,12 @@ using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
-using HtmlAgilityPack;
 
 namespace C9Launcher
 {
@@ -22,12 +24,14 @@ namespace C9Launcher
         private readonly string bannersFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Banners");
         private readonly string localVersionFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "version.txt");
 
-        // URL server
-        private readonly string remoteVersionUrl = "http://127.0.0.1/api/get_version.php";
-        private readonly string patchDownloadUrl = "http://127.0.0.1/patchC9/latest_patch.zip";
-        private readonly string hashApiUrl = "http://127.0.0.1/api/get_hashes.php";
-        private readonly string downloadBaseUrl = "http://127.0.0.1/patchC9/";
-        private readonly string newsPageUrl = "https://c9-hd.com/news.php";
+        // ตัวแปรสำหรับอ่าน Config
+        private readonly IConfiguration _config;
+        private readonly string remoteVersionUrl;
+        private readonly string patchDownloadUrl;
+        private readonly string hashApiUrl;
+        private readonly string downloadBaseUrl;
+        private readonly string newsApiUrl;
+        private readonly string newsPageUrl;
 
         private string currentVersion = "1.0.0";
         private string remoteLatestVersion = "";
@@ -39,6 +43,20 @@ namespace C9Launcher
         public MainWindow()
         {
             InitializeComponent();
+
+            // 1. โหลดการตั้งค่าจาก appsettings.json
+            var builder = new ConfigurationBuilder()
+                .SetBasePath(AppDomain.CurrentDomain.BaseDirectory)
+                .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
+            _config = builder.Build();
+
+            remoteVersionUrl = _config["ApiConfig:RemoteVersionUrl"] ?? "";
+            patchDownloadUrl = _config["ApiConfig:PatchDownloadUrl"] ?? "";
+            hashApiUrl = _config["ApiConfig:HashApiUrl"] ?? "";
+            downloadBaseUrl = _config["ApiConfig:DownloadBaseUrl"] ?? "";
+            newsApiUrl = _config["ApiConfig:NewsApiUrl"] ?? "";
+            newsPageUrl = _config["ApiConfig:NewsPageUrl"] ?? "https://c9-hd.com/";
+
             Loaded += MainWindow_Loaded;
             Closed += MainWindow_Closed;
         }
@@ -59,29 +77,19 @@ namespace C9Launcher
             }
         }
 
-        // --- ส่วนควบคุม UI หน้าต่างไร้ขอบ (Borderless Window) ---
+        // --- ส่วนควบคุม UI หน้าต่างไร้ขอบ ---
         private void Window_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
         {
             if (e.ChangedButton == System.Windows.Input.MouseButton.Left)
-            {
                 this.DragMove();
-            }
         }
 
-        private void BtnClose_Click(object sender, RoutedEventArgs e)
-        {
-            Application.Current.Shutdown();
-        }
-
-        private void BtnMinimize_Click(object sender, RoutedEventArgs e)
-        {
-            this.WindowState = WindowState.Minimized;
-        }
-        // --------------------------------------------------------
+        private void BtnClose_Click(object sender, RoutedEventArgs e) => Application.Current.Shutdown();
+        private void BtnMinimize_Click(object sender, RoutedEventArgs e) => this.WindowState = WindowState.Minimized;
 
         private class NewsItem
         {
-            public string Category { get; set; } = "";
+            public string Category { get; set; } = "NEWS";
             public string Title { get; set; } = "";
             public string DateText { get; set; } = "";
             public string Summary { get; set; } = "";
@@ -89,7 +97,6 @@ namespace C9Launcher
             public string LinkUrl { get; set; } = "";
         }
 
-        // --- 1. โหลดรูปภาพพื้นหลัง/Banner ---
         private void LoadBannerImage()
         {
             try
@@ -112,19 +119,20 @@ namespace C9Launcher
                     BannerImage.Source = bitmap;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.WriteLine($"Banner Load Error: {ex.Message}");
             }
         }
 
-        // --- 2. เช็กเวอร์ชันเกม ---
         private async Task CheckVersionAsync()
         {
             if (File.Exists(localVersionFile))
-                currentVersion = File.ReadAllText(localVersionFile).Trim();
+                currentVersion = await File.ReadAllTextAsync(localVersionFile);
             else
-                File.WriteAllText(localVersionFile, currentVersion);
+                await File.WriteAllTextAsync(localVersionFile, currentVersion);
 
+            currentVersion = currentVersion.Trim();
             TxtVersion.Text = $"Version: {currentVersion}";
 
             try
@@ -145,7 +153,7 @@ namespace C9Launcher
             }
         }
 
-        // --- 3. โหลดข่าวและเริ่ม slider ---
+        // --- ระบบข่าวสารผ่าน JSON API ---
         private async Task LoadNewsSliderAsync()
         {
             try
@@ -153,20 +161,16 @@ namespace C9Launcher
                 using HttpClient client = new HttpClient();
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0");
 
-                string html = await client.GetStringAsync(newsPageUrl);
-                List<NewsItem> parsed = ParseNewsFromHtml(html);
+                // ดึงข้อมูลข่าวจาก API แบบ JSON
+                string jsonResponse = await client.GetStringAsync(newsApiUrl);
+                var items = JsonSerializer.Deserialize<List<NewsItem>>(jsonResponse, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                 newsItems.Clear();
-                newsItems.AddRange(parsed.Take(5));
+                if (items != null) newsItems.AddRange(items.Take(5));
 
                 if (newsItems.Count == 0)
                 {
-                    TxtNewsCategory.Text = "NEWS";
-                    TxtNewsTitle.Text = "ไม่พบข่าว";
-                    TxtNewsDate.Text = "";
-                    TxtNewsSummary.Text = "";
-                    TxtNewsIndex.Text = "";
-                    NewsImage.Source = null;
+                    ShowEmptyNews();
                     return;
                 }
 
@@ -176,202 +180,82 @@ namespace C9Launcher
 
                 if (newsItems.Count > 1)
                 {
-                    newsTimer = new DispatcherTimer
-                    {
-                        Interval = TimeSpan.FromSeconds(5)
-                    };
+                    newsTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
                     newsTimer.Tick += NewsTimer_Tick;
                     newsTimer.Start();
                 }
             }
             catch (Exception ex)
             {
-                TxtNewsCategory.Text = "NEWS";
-                TxtNewsTitle.Text = "โหลดข่าวไม่สำเร็จ";
-                TxtNewsDate.Text = "";
-                TxtNewsSummary.Text = ex.Message;
-                TxtNewsIndex.Text = "";
-                NewsImage.Source = null;
+                Debug.WriteLine($"News API Error: {ex.Message}");
+                ShowEmptyNews();
+                TxtNewsSummary.Text = "ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ข่าวสารได้";
             }
+        }
+
+        private void ShowEmptyNews()
+        {
+            TxtNewsCategory.Text = "NEWS";
+            TxtNewsTitle.Text = "ไม่มีข่าวสารใหม่";
+            TxtNewsDate.Text = "";
+            TxtNewsSummary.Text = "";
+            TxtNewsIndex.Text = "";
+            NewsImage.Source = null;
         }
 
         private void NewsTimer_Tick(object? sender, EventArgs e)
         {
-            if (newsItems.Count == 0)
-                return;
+            if (newsItems.Count == 0) return;
 
             currentNewsIndex++;
-            if (currentNewsIndex >= newsItems.Count)
-                currentNewsIndex = 0;
+            if (currentNewsIndex >= newsItems.Count) currentNewsIndex = 0;
 
             ShowNews(newsItems[currentNewsIndex]);
             UpdateNewsIndicator();
         }
 
-        // --- 4. Parse ข่าวจาก HTML ของ news.php ---
-        private List<NewsItem> ParseNewsFromHtml(string html)
-        {
-            List<NewsItem> items = new List<NewsItem>();
-
-            HtmlDocument doc = new HtmlDocument();
-            doc.LoadHtml(html);
-
-            var newsNodes = doc.DocumentNode.SelectNodes("//div[contains(@class,'news-item')]");
-            if (newsNodes == null)
-                return items;
-
-            foreach (var node in newsNodes)
-            {
-                string category = "";
-                string title = "";
-                string dateText = "";
-                string summary = "";
-                string imageUrl = "";
-
-                var categoryNode = node.SelectSingleNode(".//div[contains(@class,'news-badge')]");
-                if (categoryNode != null)
-                    category = WebUtility.HtmlDecode(categoryNode.InnerText.Trim());
-
-                var titleNode = node.SelectSingleNode(".//h3[contains(@class,'news-title')]");
-                if (titleNode != null)
-                    title = WebUtility.HtmlDecode(titleNode.InnerText.Trim());
-
-                var dateNode = node.SelectSingleNode(".//div[contains(@class,'news-date')]");
-                if (dateNode != null)
-                {
-                    dateText = WebUtility.HtmlDecode(dateNode.InnerText.Trim());
-                    dateText = dateText.Replace("", "").Trim();
-                }
-
-                var summaryNode = node.SelectSingleNode(".//div[contains(@class,'news-desc')]");
-                if (summaryNode != null)
-                {
-                    summary = WebUtility.HtmlDecode(summaryNode.InnerText.Trim());
-                    summary = summary.Replace("\r", " ").Replace("\n", " ").Trim();
-                }
-
-                // ดึงรูปภาพ และรองรับ onerror แบบของเว็บคุณ
-                var imageNode = node.SelectSingleNode(".//div[contains(@class,'news-img-box')]//img");
-                if (imageNode != null)
-                {
-                    string src = imageNode.GetAttributeValue("src", "").Trim();
-
-                    // ถ้า src ว่างเปล่า ให้ลองดึงจาก onerror มาใช้
-                    if (string.IsNullOrWhiteSpace(src))
-                    {
-                        string onError = imageNode.GetAttributeValue("onerror", "");
-                        if (onError.Contains("this.src="))
-                        {
-                            int start = onError.IndexOf('\'') + 1;
-                            int end = onError.LastIndexOf('\'');
-                            if (start > 0 && end > start)
-                            {
-                                src = onError.Substring(start, end - start);
-                            }
-                        }
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(src))
-                        imageUrl = MakeAbsoluteUrl(newsPageUrl, src);
-                }
-
-                if (string.IsNullOrWhiteSpace(title))
-                    continue;
-
-                items.Add(new NewsItem
-                {
-                    Category = string.IsNullOrWhiteSpace(category) ? "NEWS" : category.ToUpperInvariant(),
-                    Title = title,
-                    DateText = dateText,
-                    Summary = summary,
-                    ImageUrl = imageUrl,
-                    LinkUrl = newsPageUrl
-                });
-            }
-
-            return items;
-        }
-
-        private static string MakeAbsoluteUrl(string baseUrl, string inputUrl)
-        {
-            if (string.IsNullOrWhiteSpace(inputUrl))
-                return "";
-
-            if (Uri.TryCreate(inputUrl, UriKind.Absolute, out Uri? absoluteUri))
-                return absoluteUri.ToString();
-
-            Uri baseUri = new Uri(baseUrl);
-            return new Uri(baseUri, inputUrl).ToString();
-        }
-
-        // --- 5. แสดงข่าวบนการ์ด ---
         private void ShowNews(NewsItem item)
         {
             TxtNewsCategory.Text = string.IsNullOrWhiteSpace(item.Category) ? "NEWS" : item.Category;
             TxtNewsTitle.Text = item.Title;
             TxtNewsDate.Text = item.DateText;
             TxtNewsSummary.Text = item.Summary;
-            NewsCard.Tag = item.LinkUrl;
+            NewsCard.Tag = string.IsNullOrWhiteSpace(item.LinkUrl) ? newsPageUrl : item.LinkUrl;
 
             NewsImage.Source = null;
-
             if (!string.IsNullOrWhiteSpace(item.ImageUrl))
             {
-                // โหลดรูปภาพแบบเบื้องหลัง (ไม่ทำให้หน้าต่างค้าง)
                 _ = LoadNewsImageAsync(item.ImageUrl);
             }
         }
 
-        // ฟังก์ชันโหลดรูปภาพแบบจำลองตัวเป็นบราวเซอร์ เพื่อแก้ปัญหาเว็บหล็อก
         private async Task LoadNewsImageAsync(string url)
         {
             try
             {
                 using HttpClient client = new HttpClient();
-                // แนบ User-Agent เข้าไปเพื่อไม่ให้เว็บไซต์มองว่าเป็นบอท
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-
-                // โหลดข้อมูลรูปมาเป็นไบต์
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0");
                 byte[] imageBytes = await client.GetByteArrayAsync(url);
 
-                // แปลงไบต์เป็นรูปภาพ
                 using MemoryStream stream = new MemoryStream(imageBytes);
                 BitmapImage bitmap = new BitmapImage();
                 bitmap.BeginInit();
                 bitmap.CacheOption = BitmapCacheOption.OnLoad;
                 bitmap.StreamSource = stream;
                 bitmap.EndInit();
-                bitmap.Freeze(); // สำคัญมาก เพื่อให้แสดงผลลื่นไหล
+                bitmap.Freeze();
 
                 NewsImage.Source = bitmap;
             }
-            catch
-            {
-                // หากโหลดไม่สำเร็จ ให้ปล่อยว่างไว้ไม่ให้โปรแกรมแครช
-                NewsImage.Source = null;
-            }
+            catch { NewsImage.Source = null; }
         }
 
-        private void UpdateNewsIndicator()
-        {
-            if (newsItems.Count == 0)
-            {
-                TxtNewsIndex.Text = "";
-                return;
-            }
-
-            TxtNewsIndex.Text = $"{currentNewsIndex + 1}/{newsItems.Count}";
-        }
+        private void UpdateNewsIndicator() => TxtNewsIndex.Text = newsItems.Count == 0 ? "" : $"{currentNewsIndex + 1}/{newsItems.Count}";
 
         private void BtnPrevNews_Click(object sender, RoutedEventArgs e)
         {
-            if (newsItems.Count == 0)
-                return;
-
-            currentNewsIndex--;
-            if (currentNewsIndex < 0)
-                currentNewsIndex = newsItems.Count - 1;
-
+            if (newsItems.Count == 0) return;
+            currentNewsIndex = (currentNewsIndex - 1 + newsItems.Count) % newsItems.Count;
             ShowNews(newsItems[currentNewsIndex]);
             UpdateNewsIndicator();
             RestartNewsTimer();
@@ -379,13 +263,8 @@ namespace C9Launcher
 
         private void BtnNextNews_Click(object sender, RoutedEventArgs e)
         {
-            if (newsItems.Count == 0)
-                return;
-
-            currentNewsIndex++;
-            if (currentNewsIndex >= newsItems.Count)
-                currentNewsIndex = 0;
-
+            if (newsItems.Count == 0) return;
+            currentNewsIndex = (currentNewsIndex + 1) % newsItems.Count;
             ShowNews(newsItems[currentNewsIndex]);
             UpdateNewsIndicator();
             RestartNewsTimer();
@@ -400,62 +279,46 @@ namespace C9Launcher
             }
         }
 
-        // --- ฟังก์ชันสำหรับการคลิกกล่องข่าว (เปิดบราวเซอร์) ---
         private void NewsCard_MouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
         {
             string url = NewsCard.Tag?.ToString() ?? newsPageUrl;
-            try
-            {
-                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("ไม่สามารถเปิดหน้าเว็บได้: " + ex.Message, "Error");
-            }
+            try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+            catch { MessageBox.Show("ไม่สามารถเปิดหน้าเว็บได้", "Error"); }
         }
 
-        // --- ฟังก์ชันบล็อคไม่ให้คลิกข่าวทะลุไปโดนการลากหน้าต่าง ---
-        private void NewsCard_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
-        {
-            e.Handled = true;
-        }
+        private void NewsCard_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e) => e.Handled = true;
 
-        // --- 6. ปุ่ม social ---
         private void BtnSocial_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is System.Windows.Controls.Button btn &&
-                btn.Tag is string url &&
-                !string.IsNullOrWhiteSpace(url))
-            {
+            if (sender is System.Windows.Controls.Button btn && btn.Tag is string url && !string.IsNullOrWhiteSpace(url))
                 Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-            }
         }
 
-        // --- 7. ปุ่ม options ---
         private void BtnOption_Click(object sender, RoutedEventArgs e)
         {
             string optionPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "C9ConfigGameOn.exe");
-
-            if (File.Exists(optionPath))
-                Process.Start(new ProcessStartInfo(optionPath) { UseShellExecute = true });
-            else
-                MessageBox.Show("ไม่พบไฟล์ C9ConfigGameOn.exe ในโฟลเดอร์เกม", "Error");
+            if (File.Exists(optionPath)) Process.Start(new ProcessStartInfo(optionPath) { UseShellExecute = true });
+            else MessageBox.Show("ไม่พบไฟล์ C9ConfigGameOn.exe ในโฟลเดอร์เกม", "Error");
         }
 
-        // --- 8. ปุ่ม start / update ---
         private async void BtnStart_Click(object sender, RoutedEventArgs e)
         {
+            // ตรวจสอบว่าเกมเปิดอยู่แล้วหรือไม่ ป้องกันการเปิดซ้ำซ้อน
+            if (Process.GetProcessesByName("c9").Length > 0)
+            {
+                MessageBox.Show("เกมกำลังทำงานอยู่ กรุณาตรวจสอบที่ Task Manager", "Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
             if ((BtnStart.Content?.ToString() ?? "") == "UPDATE")
             {
                 BtnStart.IsEnabled = false;
                 if (BtnRepair != null) BtnRepair.IsEnabled = false;
-
                 await DownloadAndApplyPatchAsync();
                 return;
             }
 
             string gamePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "c9.exe");
-
             if (File.Exists(gamePath))
             {
                 Process.Start(new ProcessStartInfo(gamePath) { UseShellExecute = true });
@@ -467,7 +330,6 @@ namespace C9Launcher
             }
         }
 
-        // --- 9. ดาวน์โหลดแพตช์ ZIP ---
         private async Task DownloadAndApplyPatchAsync()
         {
             string tempZipPath = Path.Combine(Path.GetTempPath(), "C9_patch.zip");
@@ -507,19 +369,19 @@ namespace C9Launcher
                     }
                 }
 
-                if (!File.Exists(tempZipPath))
-                    throw new Exception("ดาวน์โหลดแพทช์ไม่สำเร็จ");
+                if (!File.Exists(tempZipPath)) throw new Exception("ดาวน์โหลดแพทช์ไม่สำเร็จ");
 
                 BtnStart.Content = "EXTRACTING...";
                 TxtProgress.Text = "กำลังติดตั้งแพทช์...";
 
                 await Task.Run(() =>
                 {
+                    // ป้องกันการแตกไฟล์ทับไฟล์ที่กำลังถูกใช้งานอยู่
                     ZipFile.ExtractToDirectory(tempZipPath, AppDomain.CurrentDomain.BaseDirectory, true);
                 });
 
                 File.Delete(tempZipPath);
-                File.WriteAllText(localVersionFile, remoteLatestVersion);
+                await File.WriteAllTextAsync(localVersionFile, remoteLatestVersion);
                 currentVersion = remoteLatestVersion;
                 TxtVersion.Text = $"Version: {currentVersion}";
 
@@ -530,25 +392,31 @@ namespace C9Launcher
                     return;
                 }
 
-                UpdateProgressBar.Visibility = Visibility.Hidden;
-                TxtProgress.Visibility = Visibility.Hidden;
-                BtnStart.Content = "START GAME";
-                BtnStart.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FF007ACC"));
-                BtnStart.IsEnabled = true;
-                if (BtnRepair != null) BtnRepair.IsEnabled = true;
-
+                ResetStartButton();
                 MessageBox.Show("อัปเดตเกมเสร็จสมบูรณ์!", "Success");
+            }
+            catch (IOException ioEx)
+            {
+                MessageBox.Show($"ไฟล์บางส่วนถูกใช้งานอยู่ กรุณาปิดเกมหรือโปรแกรมอื่นที่เกี่ยวข้องแล้วลองอีกครั้ง\n\nรายละเอียด: {ioEx.Message}", "Extraction Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                ResetStartButton("UPDATE FAILED");
             }
             catch (Exception ex)
             {
                 MessageBox.Show(ex.Message, "Patch Error");
-                BtnStart.Content = "UPDATE FAILED";
-                BtnStart.IsEnabled = true;
-                if (BtnRepair != null) BtnRepair.IsEnabled = true;
+                ResetStartButton("UPDATE FAILED");
             }
         }
 
-        // --- 10. อัปเดต launcher ตัวเอง ---
+        private void ResetStartButton(string text = "START GAME")
+        {
+            UpdateProgressBar.Visibility = Visibility.Hidden;
+            TxtProgress.Visibility = Visibility.Hidden;
+            BtnStart.Content = text;
+            BtnStart.Background = text == "START GAME" ? new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FF007ACC")) : new SolidColorBrush(Colors.Red);
+            BtnStart.IsEnabled = true;
+            if (BtnRepair != null) BtnRepair.IsEnabled = true;
+        }
+
         private void UpdateLauncherSelf()
         {
             string currentExe = AppDomain.CurrentDomain.FriendlyName;
@@ -575,7 +443,6 @@ del ""%~f0""
             Application.Current.Shutdown();
         }
 
-        // --- 11. ปุ่ม repair ---
         private async void BtnRepair_Click(object sender, RoutedEventArgs e)
         {
             BtnStart.IsEnabled = false;
@@ -587,7 +454,7 @@ del ""%~f0""
             if (BtnRepair != null) BtnRepair.IsEnabled = true;
         }
 
-        // --- 12. ตรวจสอบไฟล์ด้วย MD5 ---
+        // --- ระบบซ่อมแซมไฟล์ความเร็วสูง (Parallel Repair) ---
         private async Task VerifyGameFilesAsync()
         {
             try
@@ -599,46 +466,41 @@ del ""%~f0""
                 using HttpClient client = new HttpClient();
                 string jsonResponse = await client.GetStringAsync(hashApiUrl);
 
-                if (!jsonResponse.Trim().StartsWith("{"))
-                {
-                    MessageBox.Show($"เซิร์ฟเวอร์ตอบกลับมาผิดพลาด (ไม่ใช่ JSON):\n\n{jsonResponse}", "API Error", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
-                }
-
                 var serverFiles = JsonSerializer.Deserialize<Dictionary<string, string>>(jsonResponse);
+                if (serverFiles == null || serverFiles.Count == 0) return;
+
                 int count = 0;
 
-                if (serverFiles != null)
+                // ตรวจสอบหลายไฟล์พร้อมกันเพื่อความรวดเร็ว
+                await Parallel.ForEachAsync(serverFiles, new ParallelOptions { MaxDegreeOfParallelism = 4 }, async (item, cancellationToken) =>
                 {
-                    foreach (var item in serverFiles)
+                    string fileName = item.Key;
+                    string serverHash = item.Value;
+                    string localPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
+
+                    string? directory = Path.GetDirectoryName(localPath);
+                    if (!string.IsNullOrWhiteSpace(directory) && !Directory.Exists(directory))
+                        Directory.CreateDirectory(directory);
+
+                    string localHash = CalculateMD5(localPath);
+
+                    if (localHash != serverHash)
                     {
-                        count++;
-                        string fileName = item.Key;
-                        string serverHash = item.Value;
-                        string localPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
-
-                        string? directory = Path.GetDirectoryName(localPath);
-                        if (!string.IsNullOrWhiteSpace(directory) && !Directory.Exists(directory))
-                            Directory.CreateDirectory(directory);
-
-                        UpdateProgressBar.Value = ((double)count / serverFiles.Count) * 100;
-                        string localHash = CalculateMD5(localPath);
-
-                        if (localHash != serverHash)
-                        {
-                            TxtProgress.Text = $"กำลังซ่อมแซมไฟล์: {fileName}";
-                            byte[] fileBytes = await client.GetByteArrayAsync(downloadBaseUrl + fileName.Replace("\\", "/"));
-                            File.WriteAllBytes(localPath, fileBytes);
-                        }
+                        Dispatcher.Invoke(() => TxtProgress.Text = $"กำลังดาวน์โหลด: {fileName}");
+                        byte[] fileBytes = await client.GetByteArrayAsync(downloadBaseUrl + fileName.Replace("\\", "/"), cancellationToken);
+                        await File.WriteAllBytesAsync(localPath, fileBytes, cancellationToken);
                     }
-                }
+
+                    int currentCount = Interlocked.Increment(ref count);
+                    Dispatcher.Invoke(() => UpdateProgressBar.Value = ((double)currentCount / serverFiles.Count) * 100);
+                });
 
                 TxtProgress.Text = "ไฟล์สมบูรณ์ 100%";
-                MessageBox.Show("ซ่อมแซมไฟล์เกมเรียบร้อยแล้ว", "Repair Complete");
+                MessageBox.Show("ซ่อมแซมไฟล์เกมเรียบร้อยแล้ว", "Repair Complete", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message, "Repair Error");
+                MessageBox.Show($"เกิดข้อผิดพลาดในการตรวจสอบไฟล์: {ex.Message}", "Repair Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
@@ -647,17 +509,20 @@ del ""%~f0""
             }
         }
 
-        // --- 13. คำนวณ MD5 ---
         private string CalculateMD5(string filePath)
         {
-            if (!File.Exists(filePath))
-                return "";
-
-            using var md5 = MD5.Create();
-            using var stream = File.OpenRead(filePath);
-            byte[] hash = md5.ComputeHash(stream);
-
-            return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+            if (!File.Exists(filePath)) return "";
+            try
+            {
+                using var md5 = MD5.Create();
+                using var stream = File.OpenRead(filePath);
+                byte[] hash = md5.ComputeHash(stream);
+                return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+            }
+            catch
+            {
+                return ""; // ถ้าไฟล์ถูกใช้อยู่ให้ตีว่า Hash ไม่ตรง จะได้โหลดใหม่หรือขึ้น Error
+            }
         }
     }
 }
